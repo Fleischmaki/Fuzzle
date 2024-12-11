@@ -143,7 +143,7 @@ def run_yinyang(smt_file: str, mutant_path: str, seed: int, n: int, transformati
     return mutants
 
 
-def run_formula_builder(smt_file: str, mutant_path: str, seed: int, n: int, transformations) -> list[str]:
+def run_formula_builder(smt_file: str, mutant_path: str, seed: int, n: int, transformations: dict) -> list[str]:
     if n <= 0:
         return []
     LOGGER.info("Building %s new assertions.", n)
