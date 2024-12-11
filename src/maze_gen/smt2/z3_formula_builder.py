@@ -22,7 +22,7 @@ BINARY_IA_OPS = frozenset([lambda x,y: x+y, lambda x,y: x-y, lambda x,y: x*y, la
 IA_RELATIONS = frozenset([lambda x,y: x<y, lambda x,y: x<=y, lambda x,y: x>y, lambda x,y: x>=y])
 
 
-UNARY_BV_OPS = frozenset([lambda x: ~x, lambda x: -x, z3.RotateLeft,z3.RotateRight])
+UNARY_BV_OPS = frozenset([lambda x: ~x, lambda x: -x]) #, z3.RotateLeft,z3.RotateRight])
 BV_SHIFTS = frozenset([lambda x,y: x << y, lambda x,y: x >> y, z3.LShR])
 BINARY_BV_OPS = frozenset([lambda x,y: x&y, lambda x,y: x|y, lambda x,y: x^y]+list(BINARY_IA_OPS)+list(BV_SHIFTS))
 OTHER_BV_OPS = frozenset([z3.ZeroExt, z3.SignExt, z3.Extract, z3.Concat])
