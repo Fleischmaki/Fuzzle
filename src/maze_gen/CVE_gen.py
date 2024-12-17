@@ -1,7 +1,7 @@
 import random 
 import logging
 
-from smt2 import parser, converter # pylint: disable=import-error
+from smt2 import z3_parser as parser, converter # pylint: disable=import-error
 import transforms # pylint: disable=import-error
 
 LOGGER = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ class Generator:
         
         if 'BV' in self.logic:
             logic_def += converter.get_bv_helpers(self.is_wd)
-        if self.array_size > 0:
+        if '_A' in self.logic or self.logic[0] == 'A':
             logic_def += converter.get_array_helpers(self.array_size)
         return logic_def
 
@@ -69,16 +69,20 @@ class Generator:
                 for var in variables:
                     buggy_constraints += self.get_initialisation(var)
                     
-
                 if len(self.edges[idx]) > 1:
                     buggy_constraints += "\tchar c = __VERIFIER_nondet_char();\n"
-                buggy_constraints += "\tint flag = 0;\n"
-                for constraint in constraints:
-                    buggy_constraints += "\t"*tab_cnt + "\tif{}{{\n".format(constraint)
-                    tab_cnt += 1
-                buggy_constraints += "\t"*tab_cnt + "\tflag = 1;\n"
-                for k in range(len(constraints)-1, -1, -1):
-                    buggy_constraints += "\t"*k + "\t}\n"
+                buggy_constraints += f"\tint flag = {1 if self.transformations['assume'] else 0};\n"
+                if not self.transformations['assume']:
+                    for constraint in constraints:
+                        buggy_constraints += "\t"*tab_cnt + "\tif{}{{\n".format(constraint)
+                        tab_cnt += 1
+                    buggy_constraints += "\t"*tab_cnt + "\tflag = 1;\n"
+                    for k in range(len(constraints)-1, -1, -1):
+                        buggy_constraints += "\t"*k + "\t}\n"
+                else:
+                    for constraint in constraints:
+                        buggy_constraints += "\t"*tab_cnt + "\t__VERIFIER_assume({});\n".format(constraint)
+
                 logic_c.append(buggy_constraints)
                 group_idx += self.insert[idx]
         return logic_c

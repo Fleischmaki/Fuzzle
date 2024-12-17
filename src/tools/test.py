@@ -383,7 +383,7 @@ def store_outputs(conf: dict, out_dir: str, works: list[Target]):
                     if tag in conf['abort_on_error']:
                         if conf['check_error'] is None:
                             has_bug = True
-                        else:
+                        elif not has_bug:
                             has_bug =  not check_error(conf, w, tag, out_dir)
                     commands.run_cmd(CP_CMD % (get_maze_dir(w.maze), out_path)) # Keep buggy mazes
                     write_summary(conf, out_dir, w, tag, runtime)
@@ -479,13 +479,19 @@ def main(conf, out_dir):
 
     gen = TargetGenerator(conf)
     while gen.has_targets() and not done:
-        works, to_remove = fetch_works(conf, gen)
-        spawn_containers(conf, works)
-        run_tools(conf, works)
-        done = store_outputs(conf, out_dir, works)
-        cleanup(to_remove)
-        if conf['coverage']:
-            store_coverage(conf,works,out_dir)
+        try:
+            works, to_remove = fetch_works(conf, gen)
+            spawn_containers(conf, works)
+            run_tools(conf, works)
+            done = store_outputs(conf, out_dir, works)
+            cleanup(to_remove)
+            if conf['coverage']:
+                store_coverage(conf,works,out_dir)
+        except KeyboardInterrupt:
+            for work in works:
+                docker.kill_docker(work.tool, work.index)
+            done=True
+    
 
 def load(argv):
     if argv[0].endswith('.conf.json'):
