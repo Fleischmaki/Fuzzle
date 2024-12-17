@@ -1,24 +1,53 @@
 import os
 from smt2.z3_converter import ARRAY_SIZE_STRING
 from storm.utils.randomness import Randomness
-from smt2. 
 import smt2.z3_parser
 import transforms
 
+# Place where mutants will be generated #
 MUTANT_LOC = '/tmp/minotaur-files'
 
 def get_storm_snippets_from_file(file: str, seed: int, n: int, constraint_call: str = '__VERIFIER_assume', depth=10, conjuncts=20) \
     -> list[list[str]]:
-    t_dict = transforms.parse_transformations('storm_sat')
+    """
+    Generate n mutants using storm and translate the corresponding assertions
+    :param file: path to seed file
+    :param seed: integer seed to control randomness
+    :param n: number of mutants to generate
+    :param constraint_call: wrap expression X in call(X);
+    :param depth: Size of each assertion (~depth of formula tree)
+    :param conjuncts: Size of each assertion (~depth of formula tree)
+    :returns:
+        List of assumptions per mutant.
+        Every list of assumptions (in C) is guaranteed to be SAT. 
+        Also every mutant is guaranteed to share the same model, so the conjunction of
+        mutants should also be SAT.
+    """
+    t_dict = transforms.parse_transformations(f'storm_sat{conjuncts}x{depth}')
     os.system(f'mkdir -p {MUTANT_LOC}')
     mutants = transforms.run_storm(file, MUTANT_LOC, seed, n, t_dict)
     snippets = get_snippets_for_mutants(constraint_call, t_dict, mutants)
     os.system(f'rm -r {MUTANT_LOC}')
     return snippets
 
-def get_fb_snippets_from_file(file: str, seed: int, n: int, constraint_call: str = '__VERIFIER_assume', depth=10, conjuncts=20) \
+def get_sat_snippets_from_file(file: str, seed: int, n: int, constraint_call: str = '__VERIFIER_assume', depth=10, conjuncts=20) \
     -> list[list[str]]:
-    t_dict = transforms.parse_transformations('fuzz_sat')
+    """
+    Generate n mutants using mixed mode; filter SAT one  and translate the corresponding assertions
+    :param file: path to seed file
+    :param seed: integer seed to control randomness
+    :param n: number of mutants to generate
+    :param constraint_call: wrap expression X in call(X);
+    :param depth: Size of each assertion (~depth of formula tree)
+    :param conjuncts: Size of each assertion (~depth of formula tree)
+    :returns:
+        List of assumptions per mutant.
+        Every list of assumptions (in C) is guaranteed to be SAT. 
+        However different mutants might have different models.
+        Might take longer, as we might generate a lot of UNSAT mutants.
+        Also some mutants might fail to be translated, in which case we generate more.
+    """
+    t_dict = transforms.parse_transformations(f'fuzz_sat{conjuncts}x{depth}')
     snippets = []
     rand = Randomness(seed)
     while len(snippets) < n:
@@ -32,29 +61,35 @@ def get_fb_snippets_from_file(file: str, seed: int, n: int, constraint_call: str
     os.system(f'rm -r {MUTANT_LOC}')
     return snippets
 
-def get_snippets_for_mutants(constraint_call, t_dict, mutants):
-    parse_results = [smt2.z3_parser.parse(mutant, t_dict, False, True) for mutant in mutants]
+def get_random_snippets_from_file(file: str, seed: int, n: int, constraint_call: str = '__VERIFIER_assume', depth=10, conjuncts=20) \
+    -> list[list[str]]:
+    """
+    Generate n mutants using mixed mode. 
+    :param file: path to seed file
+    :param seed: integer seed to control randomness
+    :param n: number of mutants to generate
+    :param constraint_call: wrap expression X in call(X);
+    :param depth: Size of each assertion (~depth of formula tree)
+    :param conjuncts: Size of each assertion (~depth of formula tree)
+    :returns:
+        List of assumptions per mutant.
+        Assumptions might be sat or unsat.
+        Some mutants might fail to be translated, in which case we generate more.
+        Might therefore run a bit longer than STORM.
+    """
+    t_dict = transforms.parse_transformations(f'fuzz_sat{conjuncts}x{depth}')
     snippets = []
-    for (constraints, vars_to_types, array_size) in parse_results:
-        arr_str = f"const int {ARRAY_SIZE_STRING} = {array_size};"        
-        var_strs = [get_initialisation(var,vartype) for var, vartype in vars_to_types.items()]
-        expressions_strings = [f"{constraint_call}({constraint});" for constraint in constraints]
-        snippets.append([arr_str]+var_strs+expressions_strings)
+    rand = Randomness(seed)
+    while len(snippets) < n:
+        os.system(f'mkdir -p {MUTANT_LOC}')
+        mutants = transforms.run_formula_builder(file, MUTANT_LOC, rand.get_random_integer(0,65000), n, t_dict)
+        for mutant in mutants:
+            try:
+                snippets.extend(get_snippets_for_mutants(constraint_call, t_dict, [mutant]))
+            except ValueError:
+                print(f"Failed to convert mutant {mutant}")
+    os.system(f'rm -r {MUTANT_LOC}')
     return snippets
-
-def get_initialisation(var, var_type):
-    if '[' in var: #Arrays
-        return "{} {};".format(var_type.split('_')[-1],var)
-    if var_type == 'bool':
-        return "_Bool {} = __VERIFIER_nondet_bool();".format(var)
-    if var_type == 'const bool':
-        return " const _Bool {} = __VERIFIER_nondet_bool();".format(var)
-    orig_type = var_type
-    short_type = orig_type.split(" ")[-1]
-    if 'unsigned' in orig_type:
-        short_type = 'u' + short_type
-    return "{} {} = __VERIFIER_nondet_{}();".format(var_type, var, short_type)
-
 
 def get_bv_helpers(well_defined=True, logic="QF_AUFBV") -> str:
     """Returns helper functions for BV translation
@@ -137,14 +172,44 @@ def get_array_helpers(size):
     }\n}""")
     return res
 
+def get_snippets_for_mutants(constraint_call, t_dict, mutants):
+    parse_results = [smt2.z3_parser.parse(mutant, t_dict, False, True) for mutant in mutants]
+    snippets = []
+    for (constraints, vars_to_types, array_size) in parse_results:
+        arr_str = f"const int {ARRAY_SIZE_STRING} = {array_size};"        
+        var_strs = [get_initialisation(var,vartype) for var, vartype in vars_to_types.items()]
+        expressions_strings = [f"{constraint_call}({constraint});" for constraint in constraints]
+        snippets.append([arr_str]+var_strs+expressions_strings)
+    return snippets
+
+def get_initialisation(var, var_type):
+    if '[' in var: #Arrays
+        return "{} {};".format(var_type.split('_')[-1],var)
+    if var_type == 'bool':
+        return "_Bool {} = __VERIFIER_nondet_bool();".format(var)
+    if var_type == 'const bool':
+        return " const _Bool {} = __VERIFIER_nondet_bool();".format(var)
+    orig_type = var_type
+    short_type = orig_type.split(" ")[-1]
+    if 'unsigned' in orig_type:
+        short_type = 'u' + short_type
+    return "{} {} = __VERIFIER_nondet_{}();".format(var_type, var, short_type)
+
+
 
 if __name__ == '__main__':
-    for snippet in get_storm_snippets_from_file('/home/markus/MinotaurProject/bitvector/bitvector-s3_srvr_3_alt.BV.c.cil-test000045.smt2', 0, 10):
+    import sys
+    for snippet in get_storm_snippets_from_file(sys.argv[1], 0, 10):
         print('----------------')
         print('\n'.join(snippet))
     
     print('\n'*5)
     
-    for snippet in get_fb_snippets_from_file('/home/markus/MinotaurProject/bitvector/bitvector-s3_srvr_3_alt.BV.c.cil-test000045.smt2', 0, 10):
+    for snippet in get_sat_snippets_from_file(sys.argv[1], 0, 10):
+        print('----------------')
+        print('\n'.join(snippet))
+        
+     
+    for snippet in get_random_snippets_from_file(sys.argv[1], 0, 10):
         print('----------------')
         print('\n'.join(snippet))
