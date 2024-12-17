@@ -512,10 +512,11 @@ class Converter():
             value =  "1" if is_true(node) else "0"
             cons.write(value)
         elif ff.is_declared_variable(node):
+            var = clean_string(str(node))
             dim = ff.get_array_dim(node)
             if dim >= 1:
                 cons.write("(long *)")
-            var = clean_string(str(node))
+                var = var.split('_')[0]
             if dim == 0 and node.sort_kind() == Z3_BV_SORT and not has_matching_type(ff.get_bv_width(node)):
                 cons.write(get_unsigned_cast(node, always=True))
             cons.write(f'({var})')
